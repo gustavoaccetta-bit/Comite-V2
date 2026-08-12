@@ -11,7 +11,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { fmtBRL, fmtPct, listMeses, mesLabel, MESES_PT } from "@/lib/format";
 import { useComiteData, type Modo } from "@/hooks/use-comite-data";
-import { useFcConsolidado, useFcSaldoInicial } from "@/hooks/use-fluxo-caixa";
+import { useFcConsolidado, useFcSaldoInicial, useFcCarteiras, type CarteiraRow } from "@/hooks/use-fluxo-caixa";
 import { buildConsolidadoRows } from "@/routes/_authenticated/fluxo-de-caixa";
 import { AnaliseCard } from "@/components/analise-card";
 
@@ -343,110 +343,83 @@ function ComiteView({ mes }: { mes: string }) {
 
 /* ============================ CARTEIRAS ============================ */
 
-const BLOCOS_RECEBIDOS = [
-  { titulo: "Saldos", categorias: ["Adiantamento de Pacote de Locação", "Caução (MA)", "Caução (ML)"] },
-  { titulo: "GMV", categorias: ["Locação ME", "Pacote de Locação (MA)", "Pacote de Locação (ML)", "Locação Short Stay"] },
-  { titulo: "Receitas Intramês", categorias: ["Comissão Seguro (MA)", "Manutenção de Danos", "Receita de Administração", "Rendimentos de Aplicações", "Up-Selling"] },
-  { titulo: "Receitas Transitórias", categorias: ["Recorrência Imobiliária Credpago", "Reembolso", "Reembolso Proprietário CAPEX"] },
-];
+const CARTEIRAS_OPERACIONAIS = ["ML", "MA", "ME", "SS"] as const;
 
-const CARTEIRAS = [
-  { nome: "MA", entradas: ["Pacote de Locação (MA)", "Recorrência Imobiliária Credpago"], saidas: ["Água e Esgoto (MA)", "Aluguel (MA)", "CAPEX (MA)", "Condomínio (MA)", "Distribuição Proprietário (MA)", "Energia Elétrica (MA)", "Gás (MA)", "Internet (MA)", "IPTU (MA)", "Limpeza (MA)", "Manutenção (MA)", "Seguros (MA)", "Taxa de Lixo (MA)", "Taxa de Serviço (MA)"] },
-  { nome: "ML", entradas: ["Pacote de Locação (ML)"], saidas: ["Água e Esgoto", "Aluguel", "Condomínio", "Energia Elétrica", "Gás", "Internet", "IPTU", "Limpeza", "Manutenção", "Seguros", "Taxa de Lixo", "IRRF Locatário"] },
-  { nome: "ME", entradas: ["Locação ME"], saidas: ["Distribuição Proprietário ME", "Administração", "Taxa de contrato", "Garantido ME", "Manutenção ME", "Seg. Fiança"] },
-  { nome: "Shortstay", entradas: ["Locação Short Stay"], saidas: ["Distribuição Proprietário Short Stay", "Limpeza Short Stay", "Manutenção Short Stay", "Taxa de Limpeza Short Stay", "Taxa de Serviço Short Stay"] },
-];
+/** Remove o prefixo "Carteira " do nome vindo de v_fc_carteiras (ex.: "Carteira ML" -> "ML"). */
+const normCarteira = (c: string) => c.replace(/^Carteira\s+/i, "").trim();
 
-type MovRow = { categoria: string; valor: number; mes_referencia: string };
+type CarteiraSerieMes = { mesLabel: string; recebidos: number; custos: number; saldo: number };
+
+/**
+ * Série jan..mesNum para uma carteira, a partir de v_fc_carteiras.
+ * CP já vem negativo na view: não inverter sinal; saldo = CR + CP (soma direta).
+ */
+function buildCarteiraSerie(rows: CarteiraRow[] | undefined, carteira: string, mesNum: number): CarteiraSerieMes[] {
+  const porMes = new Map<number, { cr: number; cp: number }>();
+  for (let m = 1; m <= mesNum; m++) porMes.set(m, { cr: 0, cp: 0 });
+
+  (rows ?? []).forEach(r => {
+    if (normCarteira(r.carteira) !== carteira) return;
+    const m = Number(r.mes_referencia.slice(5, 7));
+    const cur = porMes.get(m);
+    if (!cur) return;
+    const v = Number(r.valor) || 0;
+    if (r.tipo === "CR") cur.cr += v;
+    else if (r.tipo === "CP") cur.cp += v;
+  });
+
+  return Array.from(porMes.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([m, { cr, cp }]) => ({
+      mesLabel: MESES_PT[m - 1].slice(0, 3),
+      recebidos: cr,
+      custos: cp,
+      saldo: cr + cp,
+    }));
+}
+
+function CarteiraOperacionalChart({ titulo, data }: { titulo: string; data: CarteiraSerieMes[] }) {
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">{titulo}</CardTitle></CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={320}>
+          <ComposedChart data={data} margin={{ left: 10, right: 20 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="mesLabel" fontSize={12} />
+            <YAxis tickFormatter={(v) => fmtBRL(v)} fontSize={11} width={90} />
+            <RTooltip formatter={(v: number) => fmtBRL(v)} />
+            <Legend />
+            <Bar dataKey="recebidos" name="Recebidos" fill={COL_PRIMARY} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="custos" name="Custos" fill={COL_DESTRUCTIVE} radius={[0, 0, 4, 4]} />
+            <Line type="monotone" dataKey="saldo" name="Saldo" stroke="var(--foreground)" strokeWidth={2} dot={{ r: 3 }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
 
 function CarteirasView({ mes }: { mes: string }) {
   const year = Number(mes.slice(0, 4));
   const mesNum = Number(mes.slice(5, 7));
-  const mesAnteriorNum = mesNum - 1;
 
-  const { data: recebimentos } = useQuery({
-    queryKey: ["carteiras_recebimentos_ano", year],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("carteiras_recebimentos")
-        .select("categoria, valor, mes_referencia")
-        .gte("mes_referencia", `${year}-01-01`)
-        .lte("mes_referencia", `${year}-12-01`);
-      if (error) throw error;
-      return (data ?? []) as MovRow[];
-    },
-  });
-  const { data: pagamentos } = useQuery({
-    queryKey: ["carteiras_pagamentos_ano", year],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("carteiras_pagamentos")
-        .select("categoria, valor, mes_referencia")
-        .gte("mes_referencia", `${year}-01-01`)
-        .lte("mes_referencia", `${year}-12-01`);
-      if (error) throw error;
-      return (data ?? []) as MovRow[];
-    },
-  });
+  const { data: carteirasRows } = useFcCarteiras(year);
 
-  const catMap = (rows: MovRow[] | undefined, m: number) => {
-    const map = new Map<string, number>();
-    for (const r of rows ?? []) {
-      if (Number(r.mes_referencia.slice(5, 7)) !== m) continue;
-      map.set(r.categoria, (map.get(r.categoria) ?? 0) + Number(r.valor));
-    }
-    return map;
-  };
-
-  const saldoCarteira = (rec: Map<string, number>, pag: Map<string, number>, def: typeof CARTEIRAS[number]) => {
-    const entradas = def.entradas.reduce((a, c) => a + (rec.get(c) ?? 0), 0);
-    const saidas = def.saidas.reduce((a, c) => a + Math.abs(pag.get(c) ?? 0), 0);
-    return entradas - saidas;
-  };
-
-  const recAtual = catMap(recebimentos, mesNum);
-  const pagAtual = catMap(pagamentos, mesNum);
-  const recAnt = catMap(recebimentos, mesAnteriorNum);
-  const pagAnt = catMap(pagamentos, mesAnteriorNum);
-
-  const chartData = CARTEIRAS.map(def => ({
-    carteira: def.nome,
-    atual: saldoCarteira(recAtual, pagAtual, def),
-    anterior: mesAnteriorNum >= 1 ? saldoCarteira(recAnt, pagAnt, def) : 0,
-  }));
-
-  const blocoTotal = (titulo: string) => {
-    const def = BLOCOS_RECEBIDOS.find(b => b.titulo === titulo)!;
-    return def.categorias.reduce((a, c) => a + (recAtual.get(c) ?? 0), 0);
-  };
-
-  const mesAntLabel = mesAnteriorNum >= 1 ? MESES_PT[mesAnteriorNum - 1] : "—";
+  const series = useMemo(
+    () => Object.fromEntries(
+      CARTEIRAS_OPERACIONAIS.map(c => [c, buildCarteiraSerie(carteirasRows, c, mesNum)])
+    ) as Record<(typeof CARTEIRAS_OPERACIONAIS)[number], CarteiraSerieMes[]>,
+    [carteirasRows, mesNum]
+  );
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Kpi label="Saldos" value={fmtBRL(blocoTotal("Saldos"))} />
-        <Kpi label="GMV" value={fmtBRL(blocoTotal("GMV"))} />
-        <Kpi label="Receitas Intramês" value={fmtBRL(blocoTotal("Receitas Intramês"))} />
-        <Kpi label="Receitas Transitórias" value={fmtBRL(blocoTotal("Receitas Transitórias"))} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        {CARTEIRAS_OPERACIONAIS.map(c => (
+          <CarteiraOperacionalChart key={c} titulo={`Carteira ${c}`} data={series[c]} />
+        ))}
       </div>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">Saldo por carteira — {MESES_PT[mesNum - 1]} vs {mesAntLabel}</CardTitle></CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={360}>
-            <BarChart data={chartData} margin={{ left: 10, right: 20 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="carteira" fontSize={12} />
-              <YAxis tickFormatter={(v) => fmtBRL(v)} fontSize={11} width={90} />
-              <RTooltip formatter={(v: number) => fmtBRL(v)} />
-              <Legend />
-              <Bar name={MESES_PT[mesNum - 1]} dataKey="atual" fill={COL_PRIMARY} radius={[4, 4, 0, 0]} />
-              <Bar name={mesAntLabel} dataKey="anterior" fill="var(--muted-foreground)" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
 
       <AnaliseCard aba="carteiras" mesRef={`${mes}-01`} />
     </div>
@@ -457,37 +430,56 @@ function CarteirasView({ mes }: { mes: string }) {
 
 function FluxoView({ mes }: { mes: string }) {
   const year = Number(mes.slice(0, 4));
+  const mesNum = Number(mes.slice(5, 7));
   const { data: consolidado } = useFcConsolidado(year);
   const { data: saldosIniciais } = useFcSaldoInicial(year);
 
-  const { caixaFinal, fcOperacional } = useMemo(() => {
-    const rows = buildConsolidadoRows(consolidado, saldosIniciais);
-    const cf = rows.find(r => r.key === "caixa-final")?.values ?? {};
-    const op = rows.find(r => r.key === "fc-op")?.values ?? {};
-    return { caixaFinal: cf, fcOperacional: op };
-  }, [consolidado, saldosIniciais]);
-
-  const chartData = useMemo(
-    () => Array.from({ length: 12 }, (_, i) => ({
-      mes: MESES_PT[i].slice(0, 3),
-      caixaFinal: caixaFinal[i + 1] ?? 0,
-      fcOperacional: fcOperacional[i + 1] ?? 0,
-    })),
-    [caixaFinal, fcOperacional]
+  const rows = useMemo(
+    () => buildConsolidadoRows(consolidado, saldosIniciais),
+    [consolidado, saldosIniciais]
   );
+  const valuesOf = (key: string) => rows.find(r => r.key === key)?.values ?? {};
+
+  const chartData = useMemo(() => {
+    const caixaFinal = valuesOf("caixa-final");
+    const entradasOp = valuesOf("t-entradas");
+    const saidasOp = valuesOf("t-saidas");
+    const liquidoOp = valuesOf("fc-op"); // FC OPERACIONAL = Entradas + Saídas (já somado pelo hook)
+    const fcExtraOp = valuesOf("fc-extra");
+    const saldoMA = valuesOf("SALDO M.A");
+    const saldoME = valuesOf("SALDO M.E");
+    const saldoShort = valuesOf("SALDO SHORT");
+
+    return Array.from({ length: mesNum }, (_, i) => {
+      const m = i + 1;
+      return {
+        mesLabel: MESES_PT[i].slice(0, 3),
+        caixaFinal: caixaFinal[m] ?? 0,
+        entradasOp: entradasOp[m] ?? 0,
+        saidasOp: saidasOp[m] ?? 0,
+        liquidoOp: liquidoOp[m] ?? 0,
+        fcOp: liquidoOp[m] ?? 0,
+        fcExtraOp: fcExtraOp[m] ?? 0,
+        saldoMA: saldoMA[m] ?? 0,
+        saldoME: saldoME[m] ?? 0,
+        saldoShort: saldoShort[m] ?? 0,
+      };
+    });
+  }, [rows, mesNum]);
 
   return (
     <div className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle className="text-base">Caixa Final — evolução {year}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Posição de caixa final</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={340}>
+            <ResponsiveContainer width="100%" height={320}>
               <LineChart data={chartData} margin={{ left: 10, right: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="mes" fontSize={12} />
+                <XAxis dataKey="mesLabel" fontSize={12} />
                 <YAxis tickFormatter={(v) => fmtBRL(v)} fontSize={11} width={90} />
                 <RTooltip formatter={(v: number) => fmtBRL(v)} />
+                <Legend />
                 <Line type="monotone" dataKey="caixaFinal" name="Caixa Final" stroke={COL_PRIMARY} strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
@@ -495,20 +487,54 @@ function FluxoView({ mes }: { mes: string }) {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-base">FC Operacional por mês — {year}</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">Fluxo de caixa operacional</CardTitle></CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={340}>
-              <BarChart data={chartData} margin={{ left: 10, right: 20 }}>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={chartData} margin={{ left: 10, right: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="mes" fontSize={12} />
+                <XAxis dataKey="mesLabel" fontSize={12} />
                 <YAxis tickFormatter={(v) => fmtBRL(v)} fontSize={11} width={90} />
                 <RTooltip formatter={(v: number) => fmtBRL(v)} />
-                <Bar dataKey="fcOperacional" name="FC Operacional" radius={[4, 4, 0, 0]}>
-                  {chartData.map((d, i) => (
-                    <Cell key={i} fill={d.fcOperacional >= 0 ? COL_SUCCESS : COL_DESTRUCTIVE} />
-                  ))}
-                </Bar>
+                <Legend />
+                <Bar dataKey="entradasOp" name="Entradas" fill={COL_PRIMARY} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="saidasOp" name="Saídas" fill={COL_DESTRUCTIVE} radius={[0, 0, 4, 4]} />
+                <Line type="monotone" dataKey="liquidoOp" name="Líquido" stroke="var(--foreground)" strokeWidth={2} dot={{ r: 3 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">FC Operacional × Extra Operacional</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={chartData} margin={{ left: 10, right: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="mesLabel" fontSize={12} />
+                <YAxis tickFormatter={(v) => fmtBRL(v)} fontSize={11} width={90} />
+                <RTooltip formatter={(v: number) => fmtBRL(v)} />
+                <Legend />
+                <Bar dataKey="fcOp" name="FC Operacional" fill={COL_PRIMARY} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="fcExtraOp" name="FC Extra Op" fill="var(--muted-foreground)" radius={[4, 4, 0, 0]} />
               </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">Saldos das carteiras</CardTitle></CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={chartData} margin={{ left: 10, right: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="mesLabel" fontSize={12} />
+                <YAxis tickFormatter={(v) => fmtBRL(v)} fontSize={11} width={90} />
+                <RTooltip formatter={(v: number) => fmtBRL(v)} />
+                <Legend />
+                <Line type="monotone" dataKey="saldoMA" name="Saldo M.A" stroke={COL_PRIMARY} strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="saldoME" name="Saldo M.E" stroke={COL_SUCCESS} strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="saldoShort" name="Saldo Short" stroke={COL_DESTRUCTIVE} strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
