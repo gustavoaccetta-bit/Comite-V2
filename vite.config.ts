@@ -12,4 +12,9 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // Deploy target is Vercel (deploy.md) — without this, Nitro's zero-config
+  // default is "cloudflare-module", which Vercel can't run.
+  nitro: {
+    preset: "vercel",
+  },
 });
