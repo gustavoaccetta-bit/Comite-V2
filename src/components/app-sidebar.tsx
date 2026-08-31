@@ -6,7 +6,6 @@ import {
 } from "@/components/ui/sidebar";
 import { supabase } from "@/integrations/supabase/client";
 import type { Role } from "@/hooks/use-auth";
-import dividLogo from "@/assets/divid-logo.png.asset.json";
 
 export function AppSidebar({ role, email }: { role: Role; email?: string | null }) {
   const path = useRouterState({ select: r => r.location.pathname });
@@ -43,7 +42,7 @@ export function AppSidebar({ role, email }: { role: Role; email?: string | null 
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="px-2 py-3">
-          <img src={dividLogo.url} alt="Divid" className="h-8 w-auto" />
+          <img src="/marca_Divid-02.png" alt="Divid" className="h-8 w-auto" />
         </div>
       </SidebarHeader>
       <SidebarContent>

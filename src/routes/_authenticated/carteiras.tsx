@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FileDown, FileSpreadsheet } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { exportCarteiraPDF } from "@/lib/export-carteira-pdf";
@@ -44,6 +45,7 @@ const BLOCOS_RECEBIDOS = [
 
 type CarteiraDef = {
   nome: string;
+  sigla: string;
   entradas: string[];
   saidas: string[];
   noi?: boolean;
@@ -52,6 +54,7 @@ type CarteiraDef = {
 const CARTEIRAS: CarteiraDef[] = [
   {
     nome: "Management Agreement (MA)",
+    sigla: "MA",
     entradas: ["Pacote de Locação (MA)", "Recorrência Imobiliária Credpago"],
     saidas: [
       "Água e Esgoto (MA)", "Aluguel (MA)", "CAPEX (MA)", "Condomínio (MA)",
@@ -62,6 +65,7 @@ const CARTEIRAS: CarteiraDef[] = [
   },
   {
     nome: "Master Lease (ML)",
+    sigla: "ML",
     entradas: ["Pacote de Locação (ML)"],
     saidas: [
       "Água e Esgoto", "Aluguel", "Condomínio", "Energia Elétrica", "Gás",
@@ -72,6 +76,7 @@ const CARTEIRAS: CarteiraDef[] = [
   },
   {
     nome: "Carteira ME",
+    sigla: "ME",
     entradas: ["Locação ME"],
     saidas: [
       "Distribuição Proprietário ME", "Administração", "Taxa de contrato",
@@ -80,7 +85,8 @@ const CARTEIRAS: CarteiraDef[] = [
   },
   {
     nome: "Shortstay",
-    entradas: ["Locação Short Stay"],
+    sigla: "SS",
+    entradas: ["Locação Short Stay", "Airbnb", "Booking", "Expedia"],
     saidas: [
       "Distribuição Proprietário Short Stay", "Limpeza Short Stay",
       "Manutenção Short Stay", "Taxa de Limpeza Short Stay",
@@ -325,7 +331,7 @@ function CarteirasIntrames() {
         </div>
       </div>
 
-      <section className="space-y-3">
+      <section className="space-y-3 sticky top-0 z-10 bg-background pb-3 -mx-6 px-6 border-b">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h2 className="text-lg font-semibold">Recebidos Intramês</h2>
           <Select value={String(mesSel)} onValueChange={(v) => setMesSel(Number(v))}>
@@ -374,15 +380,23 @@ function CarteirasIntrames() {
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Carteiras de Locação</h2>
-        {CARTEIRAS.map(c => (
-          <CarteiraPivot
-            key={c.nome}
-            def={c}
-            mesSel={mesSel}
-            recebimentos={recebimentos ?? []}
-            pagamentos={pagamentos ?? []}
-          />
-        ))}
+        <Tabs defaultValue={CARTEIRAS[0].sigla}>
+          <TabsList>
+            {CARTEIRAS.map(c => (
+              <TabsTrigger key={c.sigla} value={c.sigla}>{c.sigla}</TabsTrigger>
+            ))}
+          </TabsList>
+          {CARTEIRAS.map(c => (
+            <TabsContent key={c.sigla} value={c.sigla}>
+              <CarteiraPivot
+                def={c}
+                mesSel={mesSel}
+                recebimentos={recebimentos ?? []}
+                pagamentos={pagamentos ?? []}
+              />
+            </TabsContent>
+          ))}
+        </Tabs>
       </section>
     </div>
   );

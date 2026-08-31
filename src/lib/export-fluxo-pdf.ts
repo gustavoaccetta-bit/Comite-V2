@@ -1,6 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import type { PivotRow, RowVariant } from "@/components/fc-table";
+import { MESES_ABBR, type PivotRow, type RowVariant } from "@/components/fc-table";
 
 type RGB = [number, number, number];
 
@@ -10,10 +10,6 @@ const AZUL_CLARO: RGB = [235, 242, 250]; // #ebf2fa
 const BRANCO: RGB = [255, 255, 255];
 const VERMELHO: RGB = [192, 57, 43]; // #c0392b
 const VERDE: RGB = [30, 126, 52]; // #1e7e34
-
-// Meses Jan-Mai 2026 (números 1-5)
-const MESES = [1, 2, 3, 4, 5];
-const MESES_LABEL = ["Jan", "Fev", "Mar", "Abr", "Mai"];
 
 const HIGHLIGHT_VARIANTS: RowVariant[] = [
   "subtotal",
@@ -35,9 +31,12 @@ export type PdfSection = {
   rows: PivotRow[];
 };
 
-export function exportFluxoPDF(sections: PdfSection[]) {
+export function exportFluxoPDF(sections: PdfSection[], mesSel: number) {
   const section = sections[0];
   if (!section) return;
+
+  const meses = Array.from({ length: mesSel }, (_, i) => i + 1);
+  const mesesLabel = meses.map((m) => MESES_ABBR[m - 1]);
 
   type LinhaPDF = {
     categoria: string;
@@ -58,7 +57,7 @@ export function exportFluxoPDF(sections: PdfSection[]) {
 
     return {
       categoria: `${row.indent ? "    " : ""}${row.label}`,
-      valores: MESES.map((m) => row.values?.[m]),
+      valores: meses.map((m) => row.values?.[m]),
       total: row.total,
       tipo,
     };
@@ -71,7 +70,7 @@ export function exportFluxoPDF(sections: PdfSection[]) {
           maximumFractionDigits: 0,
         })}`;
 
-  const head = [[section.firstColLabel || "Categoria", ...MESES_LABEL, "Total"]];
+  const head = [[section.firstColLabel || "Categoria", ...mesesLabel, "Total"]];
   const body = linhas.map((linha) => [
     linha.categoria,
     ...linha.valores.map(fmtPdf),
@@ -117,12 +116,10 @@ export function exportFluxoPDF(sections: PdfSection[]) {
     },
     columnStyles: {
       0: { cellWidth: 60, halign: "left" },
-      1: { halign: "right" },
-      2: { halign: "right" },
-      3: { halign: "right" },
-      4: { halign: "right" },
-      5: { halign: "right" },
-      6: { halign: "right" },
+      ...Object.fromEntries(
+        meses.map((_, i) => [i + 1, { halign: "right" as const }]),
+      ),
+      [meses.length + 1]: { halign: "right" as const },
     },
     didParseCell: (data) => {
       if (data.section !== "body") return;

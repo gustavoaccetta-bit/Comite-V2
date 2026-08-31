@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import type { PivotRow, RowVariant } from "@/components/fc-table";
+import { MESES_ABBR, type PivotRow, type RowVariant } from "@/components/fc-table";
 
 const AZUL_ESCURO = "FF1E3A5F"; // #1e3a5f
 const AZUL_MEDIO = "FF2C5282"; // #2c5282
@@ -8,9 +8,6 @@ const BRANCO = "FFFFFFFF";
 const VERMELHO = "FFC0392B"; // #c0392b
 const VERDE = "FF1E7E34"; // #1e7e34
 const CINZA_BORDA = "FFD9DEE6";
-
-const MESES = [1, 2, 3, 4, 5];
-const MESES_LABEL = ["Jan", "Fev", "Mar", "Abr", "Mai"];
 
 const HIGHLIGHT_VARIANTS: RowVariant[] = [
   "subtotal",
@@ -45,9 +42,11 @@ export type ExcelSection = {
   rows: PivotRow[];
 };
 
-export async function exportFluxoExcel(sections: ExcelSection[]) {
+export async function exportFluxoExcel(sections: ExcelSection[], mesSel: number) {
   const workbook = new ExcelJS.Workbook();
-  const numCols = 1 + MESES.length + 1; // Categoria + meses + Total
+  const meses = Array.from({ length: mesSel }, (_, i) => i + 1);
+  const mesesLabel = meses.map((m) => MESES_ABBR[m - 1]);
+  const numCols = 1 + meses.length + 1; // Categoria + meses + Total
 
   for (const section of sections) {
     const ws = workbook.addWorksheet(section.name, {
@@ -56,7 +55,7 @@ export async function exportFluxoExcel(sections: ExcelSection[]) {
 
     ws.columns = [
       { width: 35 },
-      ...MESES.map(() => ({ width: 15 })),
+      ...meses.map(() => ({ width: 15 })),
       { width: 15 },
     ];
 
@@ -71,7 +70,7 @@ export async function exportFluxoExcel(sections: ExcelSection[]) {
 
     // Linha 2: cabeçalho das colunas
     const headerRow = ws.getRow(2);
-    [section.firstColLabel || "Categoria", ...MESES_LABEL, "Total"].forEach(
+    [section.firstColLabel || "Categoria", ...mesesLabel, "Total"].forEach(
       (label, i) => {
         const cell = headerRow.getCell(i + 1);
         cell.value = label;
@@ -109,7 +108,7 @@ export async function exportFluxoExcel(sections: ExcelSection[]) {
       labelCell.alignment = { horizontal: "left", vertical: "middle" };
       labelCell.border = thinBorder;
 
-      const numericValues: (number | null)[] = MESES.map(
+      const numericValues: (number | null)[] = meses.map(
         (m) => (row.values?.[m] ?? null),
       );
       numericValues.push(row.total ?? null);
@@ -124,7 +123,7 @@ export async function exportFluxoExcel(sections: ExcelSection[]) {
           if (!highlight) {
             cell.font = {
               color: { argb: v < 0 ? VERMELHO : VERDE },
-              bold: i === MESES.length, // coluna Total
+              bold: i === meses.length, // coluna Total
             };
           }
         }

@@ -48,8 +48,8 @@ function FluxoCaixaPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-bold">Fluxo de Caixa</h1>
         <div className="flex items-center gap-2">
-          <ExportPdfButton year={year} />
-          <ExportExcelButton year={year} />
+          <ExportPdfButton year={year} mesSel={mesSel} />
+          <ExportExcelButton year={year} mesSel={mesSel} />
           <Select value={String(mesSel)} onValueChange={(v) => setMesSel(Number(v))}>
             <SelectTrigger className="w-36">
               <SelectValue />
@@ -500,7 +500,7 @@ function CarteirasTab({ year, mesSel }: { year: number; mesSel: number }) {
 
 /* ---------------- Exportar PDF ---------------- */
 
-function ExportPdfButton({ year }: { year: number }) {
+function ExportPdfButton({ year, mesSel }: { year: number; mesSel: number }) {
   const { data: consolidado } = useFcConsolidado(year);
   const { data: saldosIniciais } = useFcSaldoInicial(year);
   const { data: centros } = useFcCentrosCusto(year);
@@ -513,7 +513,7 @@ function ExportPdfButton({ year }: { year: number }) {
         firstColLabel: "Categoria",
         rows: buildConsolidadoRows(consolidado, saldosIniciais),
       },
-    ]);
+    ], mesSel);
   };
 
   return (
@@ -524,7 +524,7 @@ function ExportPdfButton({ year }: { year: number }) {
   );
 }
 
-function ExportExcelButton({ year }: { year: number }) {
+function ExportExcelButton({ year, mesSel }: { year: number; mesSel: number }) {
   const { data: consolidado } = useFcConsolidado(year);
   const { data: saldosIniciais } = useFcSaldoInicial(year);
   const { data: centros } = useFcCentrosCusto(year);
@@ -547,7 +547,7 @@ function ExportExcelButton({ year }: { year: number }) {
         firstColLabel: "Categoria",
         rows: buildCarteirasRows(carteiras),
       },
-    ]);
+    ], mesSel);
   };
 
   return (
