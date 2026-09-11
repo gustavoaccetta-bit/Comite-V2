@@ -35,7 +35,7 @@ const BLOCOS_RECEBIDOS = [
   },
   {
     titulo: "GMV",
-    categorias: ["Locação ME", "Pacote de Locação (MA)", "Pacote de Locação (ML)", "Locação Short Stay"],
+    categorias: ["Locação ME", "Pacote de Locação (MA)", "Pacote de Locação (ML)", "Locação Short Stay", "Airbnb", "Booking", "Expedia"],
   },
   {
     titulo: "Receitas Transitórias",
