@@ -5,37 +5,36 @@ import {
   SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { supabase } from "@/integrations/supabase/client";
-import type { Role } from "@/hooks/use-auth";
+import { canAccess, type Role } from "@/lib/permissions";
 
-export function AppSidebar({ role, email }: { role: Role; email?: string | null }) {
+export function AppSidebar({ role, email }: { role: Role | null; email?: string | null }) {
   const path = useRouterState({ select: r => r.location.pathname });
-  const isAdmin = role === "admin_divid";
 
   const groups = [
     {
       label: "Comitê",
       items: [
-        { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, show: true },
-        { title: "Comitê", url: "/comite", icon: BarChart3, show: true },
-        { title: "Carteiras", url: "/carteiras", icon: Wallet, show: true },
+        { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+        { title: "Comitê", url: "/comite", icon: BarChart3 },
+        { title: "Carteiras", url: "/carteiras", icon: Wallet },
       ],
     },
     {
       label: "Demonstrações",
       items: [
-        { title: "Fluxo de Caixa", url: "/fluxo-de-caixa", icon: LineChart, show: true },
+        { title: "Fluxo de Caixa", url: "/fluxo-de-caixa", icon: LineChart },
       ],
     },
     {
       label: "Administração",
       items: [
-        { title: "Uploads", url: "/uploads", icon: Upload, show: isAdmin },
-        { title: "Fechar Mês", url: "/fechar-mes", icon: Lock, show: isAdmin },
-        { title: "Usuários", url: "/admin/usuarios", icon: Users, show: isAdmin },
+        { title: "Uploads", url: "/uploads", icon: Upload },
+        { title: "Fechar Mês", url: "/fechar-mes", icon: Lock },
+        { title: "Usuários", url: "/admin/usuarios", icon: Users },
       ],
     },
   ]
-    .map(g => ({ ...g, items: g.items.filter(i => i.show) }))
+    .map(g => ({ ...g, items: g.items.filter(i => canAccess(role, i.url)) }))
     .filter(g => g.items.length > 0);
 
   return (

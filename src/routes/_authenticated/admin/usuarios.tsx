@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
+import { DEFAULT_ROLE, ROLES, type Role } from "@/lib/permissions";
 import { toast } from "sonner";
 import { KeyRound, Trash2 } from "lucide-react";
 
@@ -43,13 +44,12 @@ type Usuario = {
 };
 
 function UsuariosPage() {
-  const { isAdmin, loading, user } = useAuth();
-  const navigate = useNavigate();
+  // acesso à rota é controlado pelo guard central (_authenticated.tsx + lib/permissions.ts)
+  const { isAdmin, user } = useAuth();
   const qc = useQueryClient();
-  useEffect(() => { if (!loading && !isAdmin) navigate({ to: "/comite" }); }, [loading, isAdmin, navigate]);
 
   const [email, setEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"viewer" | "admin_divid">("viewer");
+  const [inviteRole, setInviteRole] = useState<Role>(DEFAULT_ROLE);
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [resetUser, setResetUser] = useState<Usuario | null>(null);
@@ -85,9 +85,12 @@ function UsuariosPage() {
       });
       const result = await response.json();
       if (result.success) {
-        toast.success(`Convite enviado para ${email}`);
+        toast.success(result.existente
+          ? `${email} já tinha login — acesso ao Comitê concedido${result.desbanido ? " e login desbloqueado" : ""}`
+          : `Convite enviado para ${email}`);
         setEmail("");
-        setInviteRole("viewer");
+        setInviteRole(DEFAULT_ROLE);
+        qc.invalidateQueries({ queryKey: ["usuarios"] });
       } else {
         toast.error(result.error ?? "Falha ao enviar convite");
       }
@@ -98,7 +101,15 @@ function UsuariosPage() {
     }
   };
 
+  const totalAdmins = (usuarios ?? []).filter(u => u.role === "admin_divid").length;
+  const isUltimoAdmin = (u: Usuario) => u.role === "admin_divid" && totalAdmins <= 1;
+
   const updateRole = async (id: string, role: string) => {
+    const alvo = usuarios?.find(u => u.id === id);
+    if (alvo && role !== "admin_divid" && isUltimoAdmin(alvo)) {
+      toast.error("Não é possível rebaixar o último admin_divid");
+      return;
+    }
     const { error } = await supabase.from("comite_user_profiles").update({ role }).eq("id", id);
     if (error) { toast.error(error.message); return; }
     toast.success("Role atualizada com sucesso");
@@ -112,12 +123,33 @@ function UsuariosPage() {
       toast.error("Você não pode remover sua própria conta");
       return;
     }
-    const { error } = await supabase.from("comite_user_profiles").delete().eq("id", id);
-    if (error) {
-      toast.error(error.message);
+    // Edge Function apaga o perfil e bloqueia o login (ban em auth.users) se o usuário
+    // não usa outra plataforma do projeto.
+    let banido = false;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? "https://nivmrhetdujvmpnvxufb.supabase.co";
+      const response = await fetch(`${supabaseUrl}/functions/v1/remove-user`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ userId: id }),
+      });
+      const result = await response.json();
+      if (!result.success) {
+        toast.error(result.error ?? "Falha ao remover usuário");
+        return;
+      }
+      banido = !!result.banido;
+    } catch (e) {
+      toast.error((e as Error).message ?? "Falha ao remover usuário");
       return;
     }
-    toast.success("Usuário removido com sucesso");
+    toast.success(banido
+      ? "Usuário removido e login bloqueado"
+      : "Usuário removido do Comitê (login mantido: usado por outra plataforma)");
     qc.invalidateQueries({ queryKey: ["usuarios"] });
     setDeletingId(null);
   };
@@ -186,11 +218,10 @@ function UsuariosPage() {
           </div>
           <div className="space-y-2 w-44">
             <Label>Role</Label>
-            <Select value={inviteRole} onValueChange={v => setInviteRole(v as "viewer" | "admin_divid")}>
+            <Select value={inviteRole} onValueChange={v => setInviteRole(v as Role)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="viewer">Viewer</SelectItem>
-                <SelectItem value="admin_divid">Admin Divid</SelectItem>
+                {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -213,8 +244,12 @@ function UsuariosPage() {
                     <Select value={u.role} onValueChange={v => updateRole(u.id, v)}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="viewer">viewer</SelectItem>
-                        <SelectItem value="admin_divid">admin_divid</SelectItem>
+                        {ROLES.map(r => (
+                          <SelectItem key={r.value} value={r.value}
+                            disabled={r.value !== "admin_divid" && isUltimoAdmin(u)}>
+                            {r.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </td>
@@ -233,7 +268,7 @@ function UsuariosPage() {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Remover usuário</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Tem certeza que deseja remover <strong>{usuarioParaDeletar?.nome ?? usuarioParaDeletar?.email ?? "este usuário"}</strong> do sistema? Esta ação não pode ser desfeita.
+                              Tem certeza que deseja remover <strong>{usuarioParaDeletar?.nome ?? usuarioParaDeletar?.email ?? "este usuário"}</strong> do Comitê? O perfil será apagado e, se o login não for usado por outra plataforma, bloqueado.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>

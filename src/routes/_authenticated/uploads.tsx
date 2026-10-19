@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -18,12 +18,8 @@ export const Route = createFileRoute("/_authenticated/uploads")({
 });
 
 function UploadsPage() {
-  const { isAdmin, loading } = useAuth();
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (!loading && !isAdmin) navigate({ to: "/comite" });
-  }, [loading, isAdmin, navigate]);
-
+  // acesso à rota é controlado pelo guard central (_authenticated.tsx + lib/permissions.ts)
+  const { isAdmin } = useAuth();
   if (!isAdmin) return null;
 
   return (
@@ -166,8 +162,6 @@ function FluxoCaixaBlock({ titulo, tipo }: { titulo: string; tipo: "CR" | "CP" }
           return cat !== "" && valorValido && !excluidas.includes(cat.toLowerCase());
         })
         .map(row => ({
-          mes_referencia: primeiroDiaDoMes, // formato 'YYYY-MM-DD'
-          tipo: tipo, // 'CR' ou 'CP'
           categoria: String(row[0]).trim(),
           valor: Number(row[1]) || 0,
           status,
@@ -179,18 +173,14 @@ function FluxoCaixaBlock({ titulo, tipo }: { titulo: string; tipo: "CR" | "CP" }
         return;
       }
 
-      // 1. Delete
-      let delQuery = supabase
-        .from("fc_lancamentos")
-        .delete()
-        .eq("mes_referencia", primeiroDiaDoMes)
-        .eq("tipo", tipo);
-      if (status !== "fechamento") delQuery = delQuery.eq("status", status);
-      const { error: delError } = await delQuery;
-      if (delError) throw delError;
-
-      // 2. Insert
-      const { error } = await supabase.from("fc_lancamentos").insert(registros);
+      // Substituição atômica: apaga TODO o mes_referencia/tipo (todos os
+      // status) e insere o lote novo, numa única transação no banco.
+      // Escopo nunca é por status — um upload é sempre o mês/tipo inteiro.
+      const { error } = await supabase.rpc("fc_replace_lancamentos", {
+        p_mes: primeiroDiaDoMes,
+        p_tipo: tipo,
+        p_registros: registros,
+      });
       if (error) throw error;
 
       const tipoLabel = tipo === "CR" ? "C.R" : "C.P";

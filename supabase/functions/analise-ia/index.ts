@@ -1,5 +1,7 @@
-// Supabase Edge Function: analise-ia
-// Deploy: supabase functions deploy analise-ia
+// Supabase Edge Function: bright-processor (analise-ia)
+// Código sincronizado com a versão de produção (v4) em 2026-10-19 + checagem de papel.
+// Em produção chama-se bright-processor (ver supabase/config.toml):
+//   npx supabase functions deploy bright-processor --project-ref nivmrhetdujvmpnvxufb --use-api
 // Secrets necessários:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (padrão)
 //   ANTHROPIC_API_KEY (adicionar via Lovable Cloud secrets)
@@ -21,9 +23,6 @@ function json(body: unknown, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
-
-const brl = (v: number) =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v);
 
 /** Nome do mês em pt-BR a partir de "YYYY-MM-01" */
 function mesLabel(ref: string) {
@@ -72,13 +71,40 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // ---- user id do JWT (opcional) ----
-    let criado_por: string | null = null;
+    // ---- Chamador: JWT válido + papel admin_divid ou viewer_gestor ----
+    // Os dados abaixo são lidos com service_role (ignora RLS), então a checagem de
+    // papel aqui é o que impede viewer_operacao/usuários de outras plataformas de
+    // obter análises de Fluxo de Caixa.
     const authHeader = req.headers.get("Authorization") ?? "";
-    if (authHeader.startsWith("Bearer ")) {
-      const { data } = await admin.auth.getUser(authHeader.replace("Bearer ", ""));
-      criado_por = data.user?.id ?? null;
-    }
+    if (!authHeader.startsWith("Bearer ")) return json({ error: "Missing Authorization" }, 401);
+    const { data: userData, error: userErr } = await admin.auth.getUser(authHeader.slice("Bearer ".length).trim());
+    if (userErr || !userData.user) return json({ error: "Unauthorized" }, 401);
+    const criado_por = userData.user.id;
+
+    const { data: perfil, error: perfilErr } = await admin
+      .from("comite_user_profiles")
+      .select("role")
+      .eq("id", criado_por)
+      .maybeSingle();
+    if (perfilErr) return json({ error: perfilErr.message }, 500);
+    if (perfil?.role !== "admin_divid" && perfil?.role !== "viewer_gestor") return json({ error: "Forbidden" }, 403);
+
+    // ---- contexto de negócio (ai_contexto) ----
+    const { data: contextos, error: ctxErr } = await admin
+      .from("ai_contexto")
+      .select("topico, conteudo")
+      .eq("ativo", true)
+      .or(`aba.is.null,aba.eq.${aba}`)
+      .order("ordem", { ascending: true });
+    if (ctxErr) throw ctxErr;
+
+    const contextoNegocio = (contextos ?? [])
+      .map((c) => `### ${c.topico}\n${c.conteudo}`)
+      .join("\n\n");
+
+    const systemPrompt = contextoNegocio
+      ? `${SYSTEM_PROMPT}\n\nCONHECIMENTO DO NEGÓCIO (siga estas diretrizes):\n\n${contextoNegocio}`
+      : SYSTEM_PROMPT;
 
     const mesTexto = mesLabel(mes_referencia);
     let dados: unknown;
@@ -257,7 +283,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1500,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       }),
     });
@@ -279,11 +305,11 @@ Deno.serve(async (req) => {
     const { data: inserted, error: insErr } = await admin
       .from("ai_analises")
       .insert({ aba, mes_referencia, modo, comentario, criado_por })
-      .select("criado_em")
+      .select("created_at")
       .single();
     if (insErr) throw insErr;
 
-    return json({ comentario, created_at: inserted?.criado_em });
+    return json({ comentario, created_at: inserted?.created_at });
   } catch (e) {
     return json({ error: (e as Error).message ?? "Erro desconhecido" }, 500);
   }

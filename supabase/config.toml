@@ -1,0 +1,20 @@
+# Configuração mínima para publicar as Edge Functions:
+#   npx supabase functions deploy <nome> --project-ref nivmrhetdujvmpnvxufb --use-api
+# Publique sempre pelo nome (sem nome, o CLI publicaria todas as pastas de functions/).
+project_id = "nivmrhetdujvmpnvxufb"
+
+# verify_jwt = true (como em produção): o gateway rejeita chamadas sem JWT válido e,
+# além disso, cada função valida o JWT e o papel por conta própria
+# (auth.getUser + comite_user_profiles).
+
+[functions.invite-user]
+verify_jwt = true
+
+[functions.remove-user]
+verify_jwt = true
+
+# Em produção a função de análise de IA se chama bright-processor (é o nome que o
+# frontend chama em src/components/analise-card.tsx); o código fica em functions/analise-ia.
+[functions.bright-processor]
+entrypoint = "./functions/analise-ia/index.ts"
+verify_jwt = true

@@ -1,13 +1,20 @@
 import { useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { isRole, type Role } from "@/lib/permissions";
 
-export type Role = "admin_divid" | "viewer" | null;
+export type { Role };
+
+// null = ainda carregando; "none" = sem perfil do Comitê (ex.: usuário de outra
+// plataforma do mesmo projeto) ou perfil ilegível — sem acesso.
+type ProfileRole = Role | "none" | null;
+
+const toProfileRole = (value: unknown): ProfileRole => (isRole(value) ? value : "none");
 
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<Role>(null);
+  const [profileRole, setProfileRole] = useState<ProfileRole>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,10 +28,10 @@ export function useAuth() {
             .select("role")
             .eq("id", s.user.id)
             .maybeSingle()
-            .then(({ data }) => setRole((data?.role as Role) ?? "viewer"));
+            .then(({ data }) => setProfileRole(toProfileRole(data?.role)));
         }, 0);
       } else {
-        setRole(null);
+        setProfileRole(null);
       }
     });
 
@@ -36,7 +43,7 @@ export function useAuth() {
           .select("role")
           .eq("id", s.user.id)
           .maybeSingle()
-          .then(({ data }) => setRole((data?.role as Role) ?? "viewer"))
+          .then(({ data }) => setProfileRole(toProfileRole(data?.role)))
           .then(() => setLoading(false));
       } else {
         setLoading(false);
@@ -46,5 +53,10 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, []);
 
-  return { session, user, role, loading, isAdmin: role === "admin_divid" };
+  const role = profileRole === "none" ? null : profileRole;
+  return {
+    session, user, role, loading,
+    noAccess: profileRole === "none",
+    isAdmin: role === "admin_divid",
+  };
 }

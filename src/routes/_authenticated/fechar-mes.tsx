@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,10 +20,9 @@ export const Route = createFileRoute("/_authenticated/fechar-mes")({
 });
 
 function FecharMesPage() {
-  const { isAdmin, loading, user } = useAuth();
-  const navigate = useNavigate();
+  // acesso à rota é controlado pelo guard central (_authenticated.tsx + lib/permissions.ts)
+  const { isAdmin, user } = useAuth();
   const qc = useQueryClient();
-  useEffect(() => { if (!loading && !isAdmin) navigate({ to: "/comite" }); }, [loading, isAdmin, navigate]);
 
   const meses = useMemo(() => listMeses(), []);
   const [mes, setMes] = useState(meses[12]);
