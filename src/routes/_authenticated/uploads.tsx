@@ -173,12 +173,13 @@ function FluxoCaixaBlock({ titulo, tipo }: { titulo: string; tipo: "CR" | "CP" }
         return;
       }
 
-      // Substituição atômica: apaga TODO o mes_referencia/tipo (todos os
-      // status) e insere o lote novo, numa única transação no banco.
-      // Escopo nunca é por status — um upload é sempre o mês/tipo inteiro.
+      // Substituição atômica no banco (delete + insert numa transação), por
+      // mes_referencia/tipo/status: realizado e previsto coexistem; só
+      // "fechamento" limpa o mês/tipo inteiro (todos os status) antes de inserir.
       const { error } = await supabase.rpc("fc_replace_lancamentos", {
         p_mes: primeiroDiaDoMes,
         p_tipo: tipo,
+        p_status: status,
         p_registros: registros,
       });
       if (error) throw error;

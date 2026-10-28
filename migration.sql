@@ -380,18 +380,20 @@ create policy "fc_lanc_admin_write" on public.fc_lancamentos for all to authenti
   using (public.is_admin_divid(auth.uid())) with check (public.is_admin_divid(auth.uid()));
 
 -- ===== RPC: substituição atômica de lançamentos do Fluxo de Caixa =====
--- Bug corrigido: uploads sucessivos do mesmo mes_referencia/tipo com status
--- diferentes (ex.: previsto -> realizado, após conciliação) deixavam as
--- linhas do status antigo na tabela, e o Total da tela (pivotValuesByStatus,
--- src/components/fc-table.tsx) soma pago+previsto -> os dois uploads eram
--- somados em vez de o novo substituir o antigo.
--- Escopo do replace passa a ser SEMPRE mes_referencia + tipo (o mês/tipo
--- inteiro, todos os status), nunca mes_referencia + tipo + status.
+-- Escopo do replace inclui o status (migrations/2026-10-28_fc_replace_lancamentos_status.sql):
+--   - realizado / previsto: substitui só as linhas daquele status, então os
+--     dois coexistem e o Total Esp. da tela (pivotValuesByStatus,
+--     src/components/fc-table.tsx) é pago + previsto;
+--   - fechamento: limpa o mês/tipo inteiro (todos os status) e substitui.
+-- Antes o DELETE era só por mes_referencia + tipo e subir o previsto apagava o realizado.
 -- security invoker: roda com o papel de quem chama, então a RLS
 -- (fc_lanc_admin_write, exige is_admin_divid) se aplica normalmente.
+drop function if exists public.fc_replace_lancamentos(date, text, jsonb);
+
 create or replace function public.fc_replace_lancamentos(
   p_mes date,
   p_tipo text,
+  p_status text,
   p_registros jsonb
 )
 returns void
@@ -404,9 +406,21 @@ begin
     raise exception 'fc_replace_lancamentos: p_registros vazio — upload abortado para não apagar sem substituir';
   end if;
 
+  if p_status is null or p_status not in ('previsto', 'realizado', 'fechamento') then
+    raise exception 'fc_replace_lancamentos: p_status inválido (%)', p_status;
+  end if;
+
+  if exists (
+    select 1 from jsonb_array_elements(p_registros) as r
+    where (r->>'status') is distinct from p_status
+  ) then
+    raise exception 'fc_replace_lancamentos: registros com status diferente de p_status (%) — upload abortado', p_status;
+  end if;
+
   delete from public.fc_lancamentos
   where mes_referencia = p_mes
-    and tipo = p_tipo;
+    and tipo = p_tipo
+    and (p_status = 'fechamento' or status = p_status);
 
   insert into public.fc_lancamentos (mes_referencia, tipo, categoria, valor, status)
   select
@@ -414,12 +428,12 @@ begin
     p_tipo,
     (r->>'categoria')::text,
     (r->>'valor')::numeric,
-    (r->>'status')::text
+    p_status
   from jsonb_array_elements(p_registros) as r;
 end;
 $$;
 
-grant execute on function public.fc_replace_lancamentos(date, text, jsonb) to authenticated;
+grant execute on function public.fc_replace_lancamentos(date, text, text, jsonb) to authenticated;
 
 -- ===== Saldo Inicial (Fluxo de Caixa) =====
 create table if not exists public.fc_saldo_inicial (
