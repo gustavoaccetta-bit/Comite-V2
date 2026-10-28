@@ -9,7 +9,7 @@ import { FileDown, FileSpreadsheet } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { exportCarteiraPDF } from "@/lib/export-carteira-pdf";
 import { exportCarteiraExcel } from "@/lib/export-carteira-excel";
-import { pivotValues, sumValueMaps, MESES_ABBR, fmtFc, valorClass } from "@/components/fc-table";
+import { pivotValues, sumValueMaps, MESES_ABBR, fmtFc, statusValorClass } from "@/components/fc-table";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/carteiras")({
@@ -547,35 +547,51 @@ function CarteiraPivot({
 
   const colCount = cols.length + 2;
 
-  const rowBg: Record<string, string> = {
-    "total-green": "bg-emerald-100 dark:bg-emerald-950/50 font-bold",
-    "total-red": "bg-red-100 dark:bg-red-950/50 font-bold",
-    saldo: "font-semibold",
+  // Paleta (mesma do FcStatusTable): [classes da linha, fundo opaco da 1ª coluna sticky]
+  const rowStyle: Record<string, [string, string]> = {
+    "total-green": ["bg-slate-50 font-bold", "bg-slate-50"],
+    "total-red": ["bg-slate-50 font-bold", "bg-slate-50"],
+    saldo: ["bg-blue-50 font-bold border-y border-blue-200", "bg-blue-50"],
   };
-  const stickyBg = (variant?: string) =>
-    variant === "total-green"
-      ? "bg-emerald-100 dark:bg-emerald-950"
-      : variant === "total-red"
-        ? "bg-red-100 dark:bg-red-950"
-        : "bg-background";
+  const noStyle: [string, string] = ["", "bg-background"];
+
+  // Densidade (mesma do FcStatusTable): fonte/padding encolhem com clamp() abaixo de ~1500px
+  const cellPad = "px-[clamp(3px,0.4vw,6px)] py-[2px]";
+  const numCell = cn(cellPad, "text-right whitespace-nowrap");
+  const thCls = cn(
+    cellPad,
+    "sticky top-0 z-10 bg-muted text-right border-b font-medium whitespace-nowrap overflow-hidden text-ellipsis",
+  );
+  // Cabeçalho em uma linha; nome completo no tooltip
+  const mesAbbr = MESES_ABBR[mesSel - 1];
+  const shortLabel: Record<string, string> = {
+    "sel-pago": `${mesAbbr} · Pago/Rec`,
+    "sel-prev": `${mesAbbr} · A pag/rec`,
+    "sel-total": `${mesAbbr} · Total esp`,
+  };
+  const cor = (v: number | undefined) => v != null && statusValorClass(v, false);
 
   return (
     <div className="relative overflow-auto rounded-lg border max-h-[calc(100vh-220px)]">
-      <table className="w-full border-collapse text-sm">
+      <table className="w-full table-fixed border-collapse tabular-nums text-[length:clamp(10px,0.8vw,12px)] leading-[15px]">
+        <colgroup>
+          <col style={{ width: "clamp(180px, 13vw, 250px)" }} />
+          {cols.map((c) => (
+            <col key={c.key} style={shortLabel[c.key] ? { width: "7%" } : undefined} />
+          ))}
+          <col />
+        </colgroup>
         <thead>
           <tr>
-            <th className="sticky left-0 top-0 z-30 bg-muted px-3 py-2 text-left min-w-[220px] max-w-[220px] border-b">
+            <th className={cn(cellPad, "sticky left-0 top-0 z-30 bg-muted text-left border-b")}>
               Categoria
             </th>
             {cols.map((c) => (
-              <th
-                key={c.key}
-                className="sticky top-0 z-10 bg-muted px-3 py-2 text-right min-w-[120px] border-b font-medium"
-              >
-                {c.label}
+              <th key={c.key} className={thCls} title={shortLabel[c.key] ? c.label : undefined}>
+                {shortLabel[c.key] ?? c.label}
               </th>
             ))}
-            <th className="sticky top-0 z-10 bg-muted px-3 py-2 text-right min-w-[110px] border-b font-semibold">
+            <th className={cn(thCls, "font-semibold border-l border-border")}>
               Total
             </th>
           </tr>
@@ -587,21 +603,25 @@ function CarteiraPivot({
                 <tr key={row.key}>
                   <td
                     colSpan={colCount}
-                    className="sticky left-0 bg-purple-800 text-white px-3 py-1.5 font-bold uppercase text-xs tracking-wide"
+                    className={cn(
+                      cellPad,
+                      "sticky left-0 bg-slate-100 text-slate-700 font-bold uppercase text-[0.92em] tracking-wide",
+                    )}
                   >
                     {row.label}
                   </td>
                 </tr>
               );
             }
-            const rowCls = row.variant ? rowBg[row.variant] ?? "" : "";
+            const [rowCls, stickyBg] = (row.variant && rowStyle[row.variant]) || noStyle;
             return (
               <tr key={row.key} className={cn("border-b last:border-0", rowCls)}>
                 <td
                   className={cn(
-                    "sticky left-0 z-20 px-3 py-1.5 text-left min-w-[220px] max-w-[220px] truncate",
-                    stickyBg(row.variant),
-                    row.indent && "pl-7",
+                    cellPad,
+                    "sticky left-0 z-20 text-left",
+                    stickyBg,
+                    row.indent && "pl-5",
                   )}
                 >
                   {row.label}
@@ -609,18 +629,17 @@ function CarteiraPivot({
                 {cols.map((c) => {
                   const v = row.cells?.[c.key];
                   return (
-                    <td
-                      key={c.key}
-                      className={cn("px-3 py-1.5 text-right tabular-nums", v != null && valorClass(v))}
-                    >
+                    <td key={c.key} className={cn(numCell, cor(v))}>
                       {v == null ? "" : fmtFc(v)}
                     </td>
                   );
                 })}
                 <td
                   className={cn(
-                    "px-3 py-1.5 text-right tabular-nums font-semibold",
-                    row.total != null && valorClass(row.total),
+                    numCell,
+                    "border-l border-border",
+                    !row.variant && "bg-muted/60",
+                    cor(row.total),
                   )}
                 >
                   {row.total == null ? "" : fmtFc(row.total)}

@@ -40,7 +40,7 @@ export function AppSidebar({ role, email }: { role: Role | null; email?: string 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="px-2 py-3">
+        <div className="px-2 py-3 group-data-[collapsible=icon]:hidden">
           <img src="/marca_Divid-02.png" alt="Divid" className="h-8 w-auto" />
         </div>
       </SidebarHeader>

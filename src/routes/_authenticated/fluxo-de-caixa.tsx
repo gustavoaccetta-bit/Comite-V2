@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Download, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -44,43 +44,43 @@ function FluxoCaixaPage() {
   );
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <h1 className="text-2xl font-bold">Fluxo de Caixa</h1>
-        <div className="flex items-center gap-2">
-          <ExportPdfButton year={year} mesSel={mesSel} />
-          <ExportExcelButton year={year} mesSel={mesSel} />
-          <Select value={String(mesSel)} onValueChange={(v) => setMesSel(Number(v))}>
-            <SelectTrigger className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MES_NUMS.map((m) => (
-                <SelectItem key={m} value={String(m)}>{MESES_ABBR[m - 1]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {years.map((y) => (
-                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
+    <div className="px-3 py-2">
+      {/* Faixa única (título + abas + export + seletores) para liberar altura para a tabela */}
       <Tabs defaultValue="consolidado">
-        <TabsList>
-          <TabsTrigger value="consolidado">Consolidado</TabsTrigger>
-          <TabsTrigger value="receitas">Receitas</TabsTrigger>
-          <TabsTrigger value="centros">Centros de Custo</TabsTrigger>
-          <TabsTrigger value="carteiras">Carteiras</TabsTrigger>
-          <TabsTrigger value="extras">Extras</TabsTrigger>
-        </TabsList>
+        <div className="flex items-center gap-x-3 gap-y-2 flex-wrap">
+          <h1 className="text-lg font-bold whitespace-nowrap">Fluxo de Caixa</h1>
+          <TabsList className="h-8">
+            <TabsTrigger value="consolidado" className="py-0.5">Consolidado</TabsTrigger>
+            <TabsTrigger value="receitas" className="py-0.5">Receitas</TabsTrigger>
+            <TabsTrigger value="centros" className="py-0.5">Centros de Custo</TabsTrigger>
+            <TabsTrigger value="carteiras" className="py-0.5">Carteiras</TabsTrigger>
+            <TabsTrigger value="extras" className="py-0.5">Extras</TabsTrigger>
+          </TabsList>
+          <div className="ml-auto flex items-center gap-2">
+            <ExportPdfButton year={year} mesSel={mesSel} />
+            <ExportExcelButton year={year} mesSel={mesSel} />
+            <Select value={String(mesSel)} onValueChange={(v) => setMesSel(Number(v))}>
+              <SelectTrigger className="w-28 h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MES_NUMS.map((m) => (
+                  <SelectItem key={m} value={String(m)}>{MESES_ABBR[m - 1]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+              <SelectTrigger className="w-24 h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {years.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         <TabsContent value="consolidado"><ConsolidadoTab year={year} mesSel={mesSel} /></TabsContent>
         <TabsContent value="receitas"><ReceitasTab year={year} mesSel={mesSel} /></TabsContent>
@@ -275,13 +275,70 @@ export function buildConsolidadoStatusRows(
   ];
 }
 
+/**
+ * Apresentação apenas: funde a faixa (header) e a linha de fecho de cada bloco numa linha de grupo
+ * recolhível, reaproveitando os statusValues do fecho (nenhum valor é recalculado).
+ */
+function groupStatusRows(
+  rows: StatusPivotRow[],
+  groups: { header: string; close: string }[],
+  collapsed: Set<string>,
+  toggle: (k: string) => void,
+): StatusPivotRow[] {
+  const out: StatusPivotRow[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const g = groups.find((x) => x.header === row.key);
+    const end = g ? rows.findIndex((r) => r.key === g.close) : -1;
+    if (!g || end <= i) {
+      out.push(row);
+      continue;
+    }
+    const isCollapsed = collapsed.has(row.key);
+    out.push({
+      key: row.key, label: row.label, variant: "group", statusValues: rows[end].statusValues,
+      collapsible: true, collapsed: isCollapsed, onToggle: () => toggle(row.key),
+    });
+    if (!isCollapsed) out.push(...rows.slice(i + 1, end).map((r) => ({ ...r, indent: true })));
+    i = end;
+  }
+  return out;
+}
+
+/** Grupos recolhíveis (recolhidos por padrão; estado só em memória) */
+function useCollapsedGroups(initial: string[]) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(initial));
+  const toggle = useCallback(
+    (k: string) =>
+      setCollapsed((prev) => {
+        const next = new Set(prev);
+        next.has(k) ? next.delete(k) : next.add(k);
+        return next;
+      }),
+    [],
+  );
+  return { collapsed, toggle };
+}
+
+const CONSOLIDADO_GROUPS = [
+  { header: "h-entradas", close: "t-entradas" },
+  { header: "h-saidas", close: "t-saidas" },
+  { header: "h-extra", close: "fc-extra" },
+  { header: "h-saldos", close: "t-saldos" },
+];
+
 function ConsolidadoTab({ year, mesSel }: { year: number; mesSel: number }) {
   const { data, isLoading } = useFcConsolidado(year);
   const { data: saldosIniciais } = useFcSaldoInicial(year);
+  const { collapsed, toggle } = useCollapsedGroups(CONSOLIDADO_GROUPS.map((g) => g.header));
 
-  const rows = useMemo<StatusPivotRow[]>(
+  const baseRows = useMemo<StatusPivotRow[]>(
     () => buildConsolidadoStatusRows(data, saldosIniciais),
     [data, saldosIniciais],
+  );
+  const rows = useMemo(
+    () => groupStatusRows(baseRows, CONSOLIDADO_GROUPS, collapsed, toggle),
+    [baseRows, collapsed, toggle],
   );
 
   if (isLoading) return <Loading />;
@@ -517,7 +574,7 @@ function ExportPdfButton({ year, mesSel }: { year: number; mesSel: number }) {
   };
 
   return (
-    <Button variant="outline" onClick={handleExport}>
+    <Button variant="outline" size="sm" onClick={handleExport}>
       <Download className="mr-2 h-4 w-4" />
       Exportar PDF
     </Button>
@@ -551,7 +608,7 @@ function ExportExcelButton({ year, mesSel }: { year: number; mesSel: number }) {
   };
 
   return (
-    <Button variant="outline" onClick={handleExport}>
+    <Button variant="outline" size="sm" onClick={handleExport}>
       <FileSpreadsheet className="mr-2 h-4 w-4" />
       Exportar Excel
     </Button>
@@ -560,10 +617,16 @@ function ExportExcelButton({ year, mesSel }: { year: number; mesSel: number }) {
 
 /* ---------------- Extras ---------------- */
 
+const EXTRAS_GROUPS = [
+  { header: "h-CR", close: "CR-total" },
+  { header: "h-CP", close: "CP-total" },
+];
+
 function ExtrasTab({ year, mesSel }: { year: number; mesSel: number }) {
   const { data, isLoading } = useFcExtras(year);
+  const { collapsed, toggle } = useCollapsedGroups(EXTRAS_GROUPS.map((g) => g.header));
 
-  const rows = useMemo<StatusPivotRow[]>(() => {
+  const baseRows = useMemo<StatusPivotRow[]>(() => {
     const result: StatusPivotRow[] = [];
     const blocks: [string, "CR" | "CP", string][] = [
       ["CR (Entradas)", "CR", "header-green"],
@@ -583,6 +646,10 @@ function ExtrasTab({ year, mesSel }: { year: number; mesSel: number }) {
     }
     return result;
   }, [data]);
+  const rows = useMemo(
+    () => groupStatusRows(baseRows, EXTRAS_GROUPS, collapsed, toggle),
+    [baseRows, collapsed, toggle],
+  );
 
   if (isLoading) return <Loading />;
   return <FcStatusTable firstColLabel="Categoria" rows={rows} mesSel={mesSel} />;

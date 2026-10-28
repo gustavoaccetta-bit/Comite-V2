@@ -33,7 +33,9 @@ export type RowVariant =
   | "header-green"
   | "header-red"
   | "header-gray"
-  | "header-purple";
+  | "header-purple"
+  /** linha de grupo recolhível (faixa + total fundidos) — só FcStatusTable */
+  | "group";
 
 export type PivotRow = {
   key: string;
@@ -275,6 +277,28 @@ export function sumStatusMaps(
   return { values, total };
 }
 
+/** Paleta da FcStatusTable: [classes da linha, fundo opaco da 1ª coluna sticky] */
+const statusRowStyle: Record<string, [string, string]> = {
+  normal: ["", "bg-background"],
+  group: ["bg-slate-100 font-bold", "bg-slate-100"],
+  subtotal: ["bg-slate-50 font-semibold", "bg-slate-50"],
+  "total-green": ["bg-slate-50 font-semibold", "bg-slate-50"],
+  "total-red": ["bg-slate-50 font-semibold", "bg-slate-50"],
+  saldo: ["bg-slate-50 font-bold", "bg-slate-50"],
+  "saldo-inicial": ["bg-slate-50 font-bold", "bg-slate-50"],
+  // indicadores intermediários: azul claro com borda
+  "fc-blue": ["bg-blue-50 font-bold border-y border-blue-200", "bg-blue-50"],
+  "caixa-livre": ["bg-blue-50 font-bold border-y border-blue-200", "bg-blue-50"],
+  // fechamento: o elemento mais pesado da tabela
+  "caixa-final": ["bg-blue-950 text-slate-50 font-bold text-[1.1em]", "bg-blue-950"],
+};
+
+/** Cor pelo sinal do valor; sobre o marinho do Caixa Final, negativo em rosa claro (legível, sem vibrar) */
+export const statusValorClass = (v: number, onDark: boolean) =>
+  onDark
+    ? v < 0 && "text-rose-200"
+    : v > 0 ? "text-success" : v < 0 ? "text-destructive" : "text-muted-foreground";
+
 export function FcStatusTable({
   firstColLabel,
   rows,
@@ -300,32 +324,46 @@ export function FcStatusTable({
     );
   };
 
+  // Densidade: fonte/padding encolhem com clamp() abaixo de ~1500px; muitas linhas => linha mais baixa
+  const cellPad = cn("px-[clamp(3px,0.4vw,6px)]", rows.length > 44 ? "py-px" : "py-[2px]");
+  const numCell = cn(cellPad, "text-right whitespace-nowrap");
+  const thCls = cn(
+    cellPad,
+    "sticky top-0 z-10 bg-muted text-right border-b font-medium whitespace-nowrap overflow-hidden text-ellipsis",
+  );
+  const mesAbbr = MESES_ABBR[mesSel - 1];
+
   return (
-    <div className="relative overflow-auto rounded-lg border max-h-[calc(100vh-220px)]">
-      <table className="w-full border-collapse text-sm">
+    <div className="relative overflow-auto rounded-lg border max-h-[calc(100dvh-7rem)]">
+      <table className="w-full table-fixed border-collapse tabular-nums text-[length:clamp(10px,0.8vw,12px)] leading-[15px]">
+        <colgroup>
+          <col style={{ width: "clamp(150px, 10.5vw, 200px)" }} />
+          {monthsBefore.map((m) => <col key={m} />)}
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "7%" }} />
+          <col style={{ width: "7%" }} />
+          <col />
+        </colgroup>
         <thead>
           <tr>
-            <th className="sticky left-0 top-0 z-30 bg-muted px-3 py-2 text-left min-w-[220px] max-w-[220px] border-b">
+            <th className={cn(cellPad, "sticky left-0 top-0 z-30 bg-muted text-left border-b")}>
               {firstColLabel}
             </th>
             {monthsBefore.map((m) => (
-              <th
-                key={m}
-                className="sticky top-0 z-10 bg-muted px-3 py-2 text-right min-w-[110px] border-b font-medium"
-              >
+              <th key={m} className={thCls}>
                 {MESES_ABBR[m - 1]}
               </th>
             ))}
-            <th className="sticky top-0 z-10 bg-muted px-3 py-2 text-right min-w-[120px] border-b font-medium">
-              {MESES_ABBR[mesSel - 1]} — Pago/Receb.
+            <th className={thCls} title={`${mesAbbr} — Pago/Recebido`}>
+              {mesAbbr} · Pago/Rec
             </th>
-            <th className="sticky top-0 z-10 bg-muted px-3 py-2 text-right min-w-[120px] border-b font-medium">
-              {MESES_ABBR[mesSel - 1]} — A Pagar/Receb.
+            <th className={thCls} title={`${mesAbbr} — A Pagar/Receber`}>
+              {mesAbbr} · A pag/rec
             </th>
-            <th className="sticky top-0 z-10 bg-muted px-3 py-2 text-right min-w-[120px] border-b font-medium">
-              {MESES_ABBR[mesSel - 1]} — Total Esp.
+            <th className={thCls} title={`${mesAbbr} — Total Esperado`}>
+              {mesAbbr} · Total esp
             </th>
-            <th className="sticky top-0 z-10 bg-muted px-3 py-2 text-right min-w-[110px] border-b font-semibold">
+            <th className={cn(thCls, "font-semibold border-l border-border")}>
               Total
             </th>
           </tr>
@@ -338,8 +376,8 @@ export function FcStatusTable({
                   <td
                     colSpan={colCount}
                     className={cn(
-                      "sticky left-0 px-3 py-1.5 font-bold uppercase text-xs tracking-wide",
-                      headerBg[row.variant],
+                      cellPad,
+                      "sticky left-0 bg-slate-100 text-slate-700 font-bold uppercase text-[0.92em] tracking-wide",
                     )}
                   >
                     {row.label}
@@ -349,24 +387,9 @@ export function FcStatusTable({
             }
 
             const variant = row.variant ?? "normal";
-            const whiteText =
-              variant === "fc-blue" || variant === "caixa-livre" || variant === "caixa-final";
-            const rowCls = rowBg[variant] ?? "";
-            const stickyBg = whiteText
-              ? variant === "caixa-livre"
-                ? "bg-blue-950"
-                : variant === "caixa-final"
-                  ? "bg-slate-900"
-                  : "bg-blue-900"
-              : variant === "subtotal"
-                ? "bg-muted"
-                : variant === "saldo-inicial"
-                  ? "bg-slate-50 dark:bg-slate-900/40"
-                  : variant === "total-green"
-                    ? "bg-emerald-100 dark:bg-emerald-950"
-                    : variant === "total-red"
-                      ? "bg-red-100 dark:bg-red-950"
-                      : "bg-background";
+            const onDark = variant === "caixa-final";
+            const [rowCls, stickyBg] = statusRowStyle[variant] ?? statusRowStyle.normal;
+            const cor = (v: number | undefined) => v != null && statusValorClass(v, onDark);
 
             const sel = row.statusValues?.[mesSel];
             const tot = rowTotal(row);
@@ -375,66 +398,59 @@ export function FcStatusTable({
               <tr key={row.key} className={cn("border-b last:border-0", rowCls)}>
                 <td
                   className={cn(
-                    stickyBase,
+                    cellPad,
+                    "sticky left-0 z-20 text-left",
                     stickyBg,
-                    row.indent && "pl-7",
-                    row.collapsible && "cursor-pointer select-none",
+                    row.indent && "pl-5",
                   )}
-                  onClick={row.onToggle}
                 >
                   <span className="flex items-center gap-1">
-                    {row.collapsible &&
-                      (row.collapsed ? (
-                        <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <ChevronDown className="h-3.5 w-3.5 shrink-0" />
-                      ))}
-                    <span className="truncate">{row.label}</span>
+                    {row.collapsible ? (
+                      <button
+                        type="button"
+                        aria-expanded={!row.collapsed}
+                        onClick={row.onToggle}
+                        className="flex items-center gap-1 text-left cursor-pointer select-none rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        {row.collapsed ? (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span className={cn(variant === "group" && "uppercase tracking-wide")}>
+                          {row.label}
+                        </span>
+                      </button>
+                    ) : (
+                      <span>{row.label}</span>
+                    )}
                     {row.labelSuffix}
                   </span>
                 </td>
                 {monthsBefore.map((m) => {
                   const v = monthTotal(row, m);
                   return (
-                    <td
-                      key={m}
-                      className={cn(
-                        "px-3 py-1.5 text-right tabular-nums",
-                        !whiteText && v != null && valorClass(v),
-                      )}
-                    >
+                    <td key={m} className={cn(numCell, cor(v))}>
                       {v == null ? "" : fmtFc(v)}
                     </td>
                   );
                 })}
-                <td
-                  className={cn(
-                    "px-3 py-1.5 text-right tabular-nums",
-                    !whiteText && sel != null && valorClass(sel.pago),
-                  )}
-                >
+                <td className={cn(numCell, cor(sel?.pago))}>
                   {sel == null ? "" : fmtFc(sel.pago)}
                 </td>
-                <td
-                  className={cn(
-                    "px-3 py-1.5 text-right tabular-nums",
-                    !whiteText && sel != null && valorClass(sel.previsto),
-                  )}
-                >
+                <td className={cn(numCell, cor(sel?.previsto))}>
                   {sel == null ? "" : fmtFc(sel.previsto)}
                 </td>
-                <td
-                  className={cn(
-                    "px-3 py-1.5 text-right tabular-nums",
-                    !whiteText && sel != null && valorClass(sel.total),
-                  )}
-                >
+                <td className={cn(numCell, cor(sel?.total))}>
                   {sel == null ? "" : fmtFc(sel.total)}
                 </td>
                 <td
                   className={cn(
-                    "px-3 py-1.5 text-right tabular-nums font-semibold",
-                    !whiteText && valorClass(tot),
+                    numCell,
+                    "border-l",
+                    onDark ? "border-blue-800" : "border-border",
+                    variant === "normal" && "bg-muted/60",
+                    cor(tot),
                   )}
                 >
                   {fmtFc(tot)}
